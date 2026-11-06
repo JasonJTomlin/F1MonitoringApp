@@ -57,9 +57,15 @@ class OpenF1:
         return self.get_filtered(endpoint, params, ttl)
 
     def get_filtered(
-        self, endpoint: str, params: dict[str, Any], ttl: float | None = 60
+        self, endpoint: str, params: dict[str, Any], ttl: float | None = 60,
+        store: bool = True,
     ) -> list[dict]:
-        """Like ``get``, for comparison filters such as ``{"date>=": value}``."""
+        """Like ``get``, for comparison filters such as ``{"date>=": value}``.
+
+        ``store=False`` bypasses the disk cache, for bulky one-off responses.
+        """
+        if not store:
+            return self._fetch(endpoint, params)
         key = hashlib.sha1(
             json.dumps([endpoint, sorted(params.items())], default=str).encode()
         ).hexdigest()

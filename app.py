@@ -13,10 +13,11 @@ truststore.inject_into_ssl()
 
 import pandas as pd  # noqa: E402
 from dash import Dash, Input, Output, State, dcc, html, no_update  # noqa: E402
+from flask import jsonify  # noqa: E402
 from pyopenf1.exceptions import PyOpenF1Error, RateLimitError  # noqa: E402
 from waitress import serve  # noqa: E402
 
-from f1dash import data, views  # noqa: E402
+from f1dash import data, live, track, views  # noqa: E402
 from f1dash.api import LiveSessionLocked  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 8050  # loopback only: not reachable from the network
@@ -31,8 +32,8 @@ def _guarded(build, *args):
         return build(*args)
     except LiveSessionLocked:
         return views.message("Session in progress",
-                             "OpenF1's free access pauses while a session is running. "
-                             "Data will appear here shortly after it ends.")
+                             "OpenF1's free data opens 30 minutes after a session ends, "
+                             "so this view will fill in then.")
     except RateLimitError:
         return views.message("Rate limit reached",
                              "OpenF1 allows 30 requests a minute. Wait a minute and "
@@ -70,6 +71,10 @@ app.layout = html.Div(className="page", children=[
     dcc.Tabs(id="tab", value="season", className="tabs", children=[
         dcc.Tab(label="Championship", value="season", children=_loading(html.Div(id="season-view"))),
         dcc.Tab(label="Session", value="session", children=_loading(html.Div(id="session-view"))),
+        dcc.Tab(label="Track", value="track", children=[
+            html.Div(id="track-root"),
+            html.P(id="track-hint", className="card-note"),
+        ]),
         dcc.Tab(label="Telemetry", value="telemetry", children=[
             html.Div(className="filters inner", children=[
                 html.Label(["Driver A", dcc.Dropdown(id="driver-a", clearable=False)],
@@ -85,7 +90,82 @@ app.layout = html.Div(className="page", children=[
         ". Unofficial; not associated with Formula 1.",
     ]),
     dcc.Interval(id="tick", interval=30_000),
+    dcc.Store(id="track-sink"),
 ])
+
+app.clientside_callback(
+    """(session, tab) => {
+        window.f1track.load(session, tab);
+        return window.dash_clientside.no_update;
+    }""",
+    Output("track-sink", "data"), Input("session", "value"), Input("tab", "value"),
+)
+
+
+def _json_guarded(build, *args):
+    """Track API responses: JSON on success, a readable ``error`` otherwise."""
+    try:
+        return jsonify(build(*args))
+    except LiveSessionLocked:
+        return jsonify(error="Car positions for this session open 30 minutes after it ends."), 423
+    except RateLimitError:
+        return jsonify(error="OpenF1 rate limit reached. Retrying shortly."), 429
+    except (PyOpenF1Error, OSError, TimeoutError, LookupError) as exc:
+        log.warning("Track data failed: %s", exc)
+        return jsonify(error="Car positions aren't available for this session."), 502
+
+
+def _replay_meta(session_key):
+    meta = track.replay_meta(session_key)
+    if meta is None:
+        raise LookupError("No lap or location data")
+    return meta
+
+
+def _live_meta():
+    meta = track.live_meta()
+    if meta is None:
+        raise LookupError("No live session or circuit outline")
+    return meta
+
+
+def _track_status():
+    in_window = track.live_session(data.sessions(this_year), data.now()) is not None
+    configured = live.credentials() is not None
+    hint = "" if configured else (
+        "Replay is free for any finished session. Following a session live needs an OpenF1 "
+        "sponsor account: see the README.")
+    return {"canWatchLive": in_window and configured, "hint": hint}
+
+
+def _live_snapshot():
+    live.feed.start()
+    return live.feed.snapshot()
+
+
+@app.server.get("/api/track/meta/<int:session_key>")
+def track_meta(session_key):
+    return _json_guarded(_replay_meta, session_key)
+
+
+@app.server.get("/api/track/chunk/<int:session_key>/<int:index>")
+def track_chunk(session_key, index):
+    return _json_guarded(track.replay_chunk, session_key, index)
+
+
+@app.server.get("/api/track/status")
+def track_status():
+    return _json_guarded(_track_status)
+
+
+@app.server.get("/api/track/live/meta")
+def track_live_meta():
+    return _json_guarded(_live_meta)
+
+
+@app.server.get("/api/track/live")
+def track_live():
+    return _json_guarded(_live_snapshot)
 
 
 @app.callback(Output("meeting", "options"), Output("meeting", "value"), Input("season", "value"))

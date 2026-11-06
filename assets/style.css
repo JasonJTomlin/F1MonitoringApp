@@ -159,9 +159,59 @@ body {
 .message h3 { margin: 0 0 4px; font-size: 15px; }
 .message p { margin: 0; color: var(--ink-2); }
 
+.track-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0 8px; }
+.track-bar [hidden] { display: none; }
+#track-seek { flex: 1 1 240px; accent-color: var(--accent); }
+.track-time { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.track-speeds { display: inline-flex; gap: 4px; }
+.track-btn {
+  background: var(--surface);
+  color: var(--ink-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+.track-btn:hover { color: var(--ink); background: #262624; }
+.track-btn.on { color: var(--ink); border-color: var(--accent); }
+.track-note { min-height: 20px; color: var(--ink-2); font-size: 12px; margin-bottom: 4px; }
+.track-layout { display: grid; grid-template-columns: minmax(0, 1fr) 170px; gap: 12px; }
+.track-stage svg { display: block; width: 100%; height: auto; }
+.track-line {
+  fill: none;
+  stroke: #4a4a46;
+  stroke-width: 7;
+  stroke-linejoin: round;
+}
+.car-dot { stroke: var(--surface); stroke-width: 2; }
+.car-label {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+}
+.track-order { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; }
+.track-order li {
+  display: flex;
+  align-items: center;
+  padding: 3px 0;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--hairline);
+}
+.order-pos {
+  flex: 0 0 24px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.track-message { min-height: 20px; margin: 10px 0 0; color: var(--ink-2); font-size: 13px; }
+
 footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
 footer a { color: var(--ink-2); }
 
 @media (max-width: 860px) {
   .grid { grid-template-columns: minmax(0, 1fr); }
+  .track-layout { grid-template-columns: minmax(0, 1fr); }
 }
