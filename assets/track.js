@@ -51,6 +51,9 @@
         <div class="card track-side">
           <h3 id="track-title"></h3>
           <div id="track-lap" class="card-note"></div>
+          <div id="track-countdown" class="track-countdown" hidden>
+            <span>Time left</span><strong id="track-countdown-value"></strong>
+          </div>
           <div id="track-order-head" class="track-order-head"></div>
           <ol id="track-order" class="track-order"></ol>
         </div>
@@ -324,11 +327,20 @@
     }
   }
 
-  function showOrder(order, tyres, inPit) {
+  function showCountdown(seconds) {
+    const box = el("track-countdown");
+    box.hidden = seconds === null;
+    if (seconds === null) return;
+    const left = Math.max(0, Math.ceil(seconds));
+    el("track-countdown-value").textContent =
+      `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+  }
+
+  function showOrder(order, tyres, inPit, retired) {
     const list = el("track-order");
     if (!list) return;
     const rows = Object.entries(order).sort((a, b) => a[1] - b[1]);
-    const key = JSON.stringify(rows.map((r) => [r[0], tyres[r[0]], inPit.has(r[0])]));
+    const key = JSON.stringify(rows.map((r) => [r[0], tyres[r[0]], inPit.has(r[0]), retired.has(r[0])]));
     if (list.dataset.key === key) return;
     list.dataset.key = key;
     list.replaceChildren(...rows.map(([number, position]) => {
@@ -341,10 +353,12 @@
       swatch.className = "swatch";
       swatch.style.background = who.colour;
       item.append(place, swatch, who.code);
-      if (inPit.has(number)) {
+      const out = retired.has(number);
+      item.classList.toggle("retired", out);
+      if (out || inPit.has(number)) {
         const flag = document.createElement("span");
-        flag.className = "pit-tag";
-        flag.textContent = "PIT";
+        flag.className = out ? "out-tag" : "pit-tag";
+        flag.textContent = out ? "OUT" : "PIT";
         item.append(flag);
       }
       item.append(tyreChip(tyres[number]));
@@ -369,8 +383,11 @@
       const i = lastBefore(visits, t, (visit) => visit[0]);
       if (i >= 0 && t < visits[i][1]) inPit.add(number);
     }
-    showOrder(order, tyres, inPit);
+    const retired = new Set(Object.keys(meta.retired).filter((n) => t >= meta.retired[n]));
+    retired.forEach((number) => inPit.delete(number));
+    showOrder(order, tyres, inPit, retired);
     showPits(inPit);
+    showCountdown(meta.practiceEnd === null ? null : meta.practiceEnd - t);
     let lap = 0;
     for (const [time, number] of meta.laps) {
       if (time > t) break;
@@ -449,6 +466,7 @@
     el("track-pit").replaceChildren();
     state.pitKey = null;
     showGantry(null, false);
+    showCountdown(null);
     if (!state.sessionKey) return;
     note("Loading circuit…");
     try {
@@ -486,8 +504,12 @@
       if (id !== state.loadId) return;
       state.liveTargets = new Map(Object.entries(body.cars));
       const inPit = new Set(body.pit.map(String));
-      showOrder(body.order, body.tyres, inPit);
+      const retired = new Set(state.meta.showTyreLaps ? [] : body.retired.map(String));
+      retired.forEach((number) => inPit.delete(number));
+      showOrder(body.order, body.tyres, inPit, retired);
       showPits(inPit);
+      const ends = state.meta.practiceEndsAt;
+      showCountdown(ends ? (Date.parse(ends) - Date.now()) / 1000 : null);
       el("track-message").textContent = body.message;
       showStatus(body.status);
       // The feed only reports lights-out, about 3 s late, so there's no build-up to show.

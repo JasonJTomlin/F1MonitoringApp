@@ -13,6 +13,7 @@ from .api import client
 CHUNK_SECONDS = 120  # about 1 MB from OpenF1, and one request per 2 minutes at 1x
 LIVE_MARGIN = pd.Timedelta(minutes=30)  # OpenF1 treats this side of a session as live
 MAX_GAP_FRAMES = 2  # bridge brief dropouts, but let a stopped feed show as missing
+FINAL_LAP_WINDOW = pd.Timedelta(minutes=10)  # long enough for a slow crawl back to the pits
 
 
 def _identities(drivers: pd.DataFrame) -> dict:
@@ -105,6 +106,53 @@ def _bounds(session_key: int) -> tuple[pd.Timestamp, pd.Timestamp]:
     return laps["date_start"].min() - pd.Timedelta(seconds=10), ends.max() + pd.Timedelta(seconds=30)
 
 
+def last_movement(rows: list[dict]) -> pd.Timestamp | None:
+    """When a car last moved, from car data rows."""
+    moving = [row["date"] for row in rows if row.get("speed")]
+    return pd.to_datetime(max(moving), utc=True, format="ISO8601") if moving else None
+
+
+def retirements(session: data.Session, start: pd.Timestamp) -> dict[int, float]:
+    """{driver: seconds} for cars that retired, timed from when each stopped moving.
+
+    Race control doesn't announce retirements and results only give the final
+    tally, so the car's speed on its last lap is the best record of the moment.
+    """
+    if not session.is_race or session.results.empty:
+        return {}
+    out: dict[int, float] = {}
+    laps = session.laps.dropna(subset=["date_start"]) if not session.laps.empty else session.laps
+    fmt = "%Y-%m-%dT%H:%M:%S.%f"
+    for row in session.results[session.results["status"].isin(["DNF", "DNS"])].itertuples():
+        number = int(row.driver_number)
+        mine = laps[laps["driver_number"] == number] if not laps.empty else laps
+        if mine.empty:
+            out[number] = 0  # never started
+            continue
+        begin = mine["date_start"].max()
+        rows = client.get_filtered(
+            "car_data",
+            {"session_key": session.info["session_key"], "driver_number": number,
+             "date>=": begin.strftime(fmt), "date<": (begin + FINAL_LAP_WINDOW).strftime(fmt)},
+            data._ttl(session.info))
+        stopped = last_movement(rows) or begin
+        out[number] = max(round((stopped - start).total_seconds(), 2), 0)
+    return out
+
+
+def practice_end(session: data.Session, start: pd.Timestamp) -> float | None:
+    """Seconds until practice ended. The chequered flag beats the schedule, which
+    misses delayed, extended and shortened sessions."""
+    if not session.info["session_name"].startswith("Practice"):
+        return None
+    ended = pd.Timestamp(session.info["date_end"])
+    if not session.control.empty:
+        flags = session.control[session.control["flag"] == "CHEQUERED"]
+        if not flags.empty:
+            ended = flags["date"].max()
+    return round((ended - start).total_seconds(), 2)
+
+
 def replay_meta(session_key: int) -> dict | None:
     """Everything the player needs up front; car positions then stream in chunks."""
     session = data.load_session(session_key)
@@ -150,6 +198,8 @@ def replay_meta(session_key: int) -> dict | None:
         "showTyreLaps": not session.is_race,
         "pits": pits.timeline(session.pits, session.laps, start, end, session.is_race,
                               session.drivers["driver_number"].tolist()),
+        "retired": retirements(session, start),
+        "practiceEnd": practice_end(session, start),
         "drivers": _identities(session.drivers),
         "order": events,
         "messages": messages,
@@ -194,6 +244,8 @@ def live_meta() -> dict | None:
     layout = circuit(year, int(current["meeting_key"]))
     title = f"{current['session_name']} · {current['location']}"
     show_laps = current["session_name"] not in ("Race", "Sprint")
+    practice_ends = (pd.Timestamp(current["date_end"]).isoformat()
+                     if current["session_name"].startswith("Practice") else None)
     for season in (year, year - 1):
         past = data.sessions(season)
         if past.empty:
@@ -210,7 +262,9 @@ def live_meta() -> dict | None:
                     "sectors": layout["sectors"] if layout else {},
                     "drivers": _identities(source.drivers),
                     "showTyreLaps": show_laps,
+                    "practiceEndsAt": practice_ends,
                 }
     if layout:
-        return {"title": title, "drivers": {}, "showTyreLaps": show_laps, **layout}
+        return {"title": title, "drivers": {}, "showTyreLaps": show_laps,
+                "practiceEndsAt": practice_ends, **layout}
     return None

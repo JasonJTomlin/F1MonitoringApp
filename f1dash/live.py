@@ -25,6 +25,10 @@ BROKER, PORT = "mqtt.openf1.org", 8883
 TOPICS = ("v1/location", "v1/position", "v1/race_control", "v1/stints", "v1/laps", "v1/pit")
 FRESH_SECONDS = 120  # the feed can replay an old SESSION STARTED stamped lap 1
 PIT_FLAG_SECONDS = 6  # keep a completed stop visible briefly in case it's the only message
+# The feed has no retirement message, so a car counts as out once it stops
+# completing laps while well behind. Backmarkers keep setting laps, so they pass.
+RETIRED_AFTER_SECONDS = 180
+RETIRED_LAPS_BEHIND = 2
 
 log = logging.getLogger("f1monitor.live")
 
@@ -62,6 +66,16 @@ class LiveFeed:
         self._stints: dict[int, dict] = {}  # each car's latest stint
         self._laps: dict[int, int] = {}
         self._pit_until: dict[int, float] = {}  # inf until a message says the car left
+        self._last_lap_at: dict[int, float] = {}
+
+    def _retired(self) -> list[int]:
+        """Cars that look retired. A race-only reading: garage time is normal elsewhere."""
+        if self._status.red or not self._laps:
+            return []
+        leader = max(self._laps.values())
+        cutoff = time.monotonic() - RETIRED_AFTER_SECONDS
+        return sorted(n for n, lap in self._laps.items()
+                      if leader - lap >= RETIRED_LAPS_BEHIND and self._last_lap_at.get(n, 0) < cutoff)
 
     def _handle_pit(self, number: int, payload: dict) -> None:
         """A row with a lane time means the car has left; one without means it's in."""
@@ -106,7 +120,10 @@ class LiveFeed:
                 if current is None or payload.get("stint_number", 0) >= current.get("stint_number", 0):
                     self._stints[number] = payload
             elif topic == "v1/laps" and number is not None:
-                self._laps[number] = max(self._laps.get(number, 0), payload.get("lap_number") or 0)
+                lap = payload.get("lap_number") or 0
+                if lap > self._laps.get(number, 0):
+                    self._last_lap_at[number] = time.monotonic()
+                self._laps[number] = max(self._laps.get(number, 0), lap)
                 if not payload.get("is_pit_out_lap"):
                     self._pit_until.pop(number, None)  # on a flying lap, whatever came before
             elif topic == "v1/pit" and number is not None:
@@ -129,6 +146,7 @@ class LiveFeed:
                 "status": self._status.snapshot(),
                 "tyres": self._tyres(),
                 "pit": self._in_pit(),
+                "retired": self._retired(),
                 "lightsOutAgo": (None if self._lights_out_at is None
                                  else round(time.monotonic() - self._lights_out_at, 1)),
             }

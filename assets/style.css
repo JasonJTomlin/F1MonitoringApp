@@ -271,6 +271,38 @@ body {
 }
 .in-pit .car-dot { opacity: 0.55; }
 .no-label .car-label { display: none; }
+.track-countdown {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding: 6px 0;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--muted);
+  font-size: 12px;
+}
+.track-countdown[hidden] { display: none; }
+.track-countdown strong {
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.track-order li.retired { color: #6d6c67; }
+.track-order li.retired .swatch,
+.track-order li.retired .tyre { opacity: 0.35; }
+.track-order li.retired .order-pos { color: #6d6c67; }
+.out-tag {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid #55554f;
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 13px;
+}
 .track-order-head { margin-top: 6px; color: var(--muted); font-size: 11px; text-align: right; }
 .tyre-cell {
   display: inline-flex;
