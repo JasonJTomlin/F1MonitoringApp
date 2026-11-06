@@ -46,6 +46,7 @@
         <div class="card track-side">
           <h3 id="track-title"></h3>
           <div id="track-lap" class="card-note"></div>
+          <div id="track-order-head" class="track-order-head"></div>
           <ol id="track-order" class="track-order"></ol>
         </div>
       </div>
@@ -82,6 +83,7 @@
   }
 
   function drawCircuit(meta) {
+    el("track-order-head").textContent = meta.showTyreLaps ? "Tyre · laps on set" : "Tyre";
     const svg = el("track-svg");
     svg.replaceChildren();
     state.marks.clear();
@@ -246,11 +248,11 @@
     if (untilNext < PREFETCH_SECONDS * state.speed) fetchChunk(index + 1, state.loadId);
   }
 
-  function lastBefore(list, t) {
+  function lastBefore(list, t, timeOf = (entry) => entry) {
     let low = 0, high = list.length - 1, found = -1;
     while (low <= high) {
       const middle = (low + high) >> 1;
-      if (list[middle] <= t) { found = middle; low = middle + 1; } else { high = middle - 1; }
+      if (timeOf(list[middle]) <= t) { found = middle; low = middle + 1; } else { high = middle - 1; }
     }
     return found;
   }
@@ -278,11 +280,33 @@
     }
   }
 
-  function showOrder(order) {
+  const TYRE_NAMES = { S: "Soft", M: "Medium", H: "Hard", I: "Intermediate", W: "Wet", "?": "Unknown compound" };
+
+  function tyreChip(tyre) {
+    const box = document.createElement("span");
+    box.className = "tyre-cell";
+    if (!tyre) return box;
+    const [compound, laps] = tyre;
+    const showLaps = state.meta.showTyreLaps && laps !== null && laps !== undefined;
+    const chip = document.createElement("span");
+    chip.className = `tyre tyre-${compound === "?" ? "unknown" : compound}`;
+    chip.textContent = compound;
+    box.title = TYRE_NAMES[compound] + (showLaps ? `, ${laps} ${laps === 1 ? "lap" : "laps"} on this set` : "");
+    box.append(chip);
+    if (showLaps) {
+      const count = document.createElement("span");
+      count.className = "tyre-laps";
+      count.textContent = laps;
+      box.append(count);
+    }
+    return box;
+  }
+
+  function showOrder(order, tyres) {
     const list = el("track-order");
     if (!list) return;
     const rows = Object.entries(order).sort((a, b) => a[1] - b[1]);
-    const key = rows.map((r) => r[0]).join();
+    const key = JSON.stringify(rows.map((r) => [r[0], tyres[r[0]]]));
     if (list.dataset.key === key) return;
     list.dataset.key = key;
     list.replaceChildren(...rows.map(([number, position]) => {
@@ -294,7 +318,7 @@
       const swatch = document.createElement("span");
       swatch.className = "swatch";
       swatch.style.background = who.colour;
-      item.append(place, swatch, who.code);
+      item.append(place, swatch, who.code, tyreChip(tyres[number]));
       return item;
     }));
   }
@@ -306,7 +330,12 @@
       if (time > t) break;
       order[number] = position;
     }
-    showOrder(order);
+    const tyres = {};
+    for (const [number, events] of Object.entries(meta.tyres)) {
+      const i = lastBefore(events, t, (event) => event[0]);
+      if (i >= 0) tyres[number] = events[i].slice(1);
+    }
+    showOrder(order, tyres);
     let lap = 0;
     for (const [time, number] of meta.laps) {
       if (time > t) break;
@@ -419,7 +448,7 @@
       const body = await (await fetch("/api/track/live")).json();
       if (id !== state.loadId) return;
       state.liveTargets = new Map(Object.entries(body.cars));
-      showOrder(body.order);
+      showOrder(body.order, body.tyres);
       el("track-message").textContent = body.message;
       showStatus(body.status);
       // The feed only reports lights-out, about 3 s late, so there's no build-up to show.

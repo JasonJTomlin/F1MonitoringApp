@@ -7,7 +7,7 @@ from functools import lru_cache
 import httpx
 import pandas as pd
 
-from . import data, status
+from . import data, status, tyres
 from .api import client
 
 CHUNK_SECONDS = 120  # about 1 MB from OpenF1, and one request per 2 minutes at 1x
@@ -146,6 +146,8 @@ def replay_meta(session_key: int) -> dict | None:
         "sectors": layout["sectors"] if layout else {},
         "status": status.timeline(session.control, start),
         "lightsOut": lights_out,
+        "tyres": tyres.timeline(session.stints, session.laps, start, from_grid=session.is_race),
+        "showTyreLaps": not session.is_race,
         "drivers": _identities(session.drivers),
         "order": events,
         "messages": messages,
@@ -189,6 +191,7 @@ def live_meta() -> dict | None:
         return None
     layout = circuit(year, int(current["meeting_key"]))
     title = f"{current['session_name']} · {current['location']}"
+    show_laps = current["session_name"] not in ("Race", "Sprint")
     for season in (year, year - 1):
         past = data.sessions(season)
         if past.empty:
@@ -204,7 +207,8 @@ def live_meta() -> dict | None:
                     "outline": shape,
                     "sectors": layout["sectors"] if layout else {},
                     "drivers": _identities(source.drivers),
+                    "showTyreLaps": show_laps,
                 }
     if layout:
-        return {"title": title, "drivers": {}, **layout}
+        return {"title": title, "drivers": {}, "showTyreLaps": show_laps, **layout}
     return None

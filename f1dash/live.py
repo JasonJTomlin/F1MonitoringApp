@@ -17,11 +17,12 @@ import httpx
 import paho.mqtt.client as mqtt
 import pandas as pd
 
+from . import tyres
 from .status import TrackStatus
 
 TOKEN_URL = "https://api.openf1.org/token"
 BROKER, PORT = "mqtt.openf1.org", 8883
-TOPICS = ("v1/location", "v1/position", "v1/race_control")
+TOPICS = ("v1/location", "v1/position", "v1/race_control", "v1/stints", "v1/laps")
 FRESH_SECONDS = 120  # the feed can replay an old SESSION STARTED stamped lap 1
 
 log = logging.getLogger("f1monitor.live")
@@ -57,6 +58,17 @@ class LiveFeed:
         self._message = ""
         self._status = TrackStatus()
         self._lights_out_at: float | None = None
+        self._stints: dict[int, dict] = {}  # each car's latest stint
+        self._laps: dict[int, int] = {}
+
+    def _tyres(self) -> dict[int, list]:
+        out = {}
+        for number, stint in self._stints.items():
+            lap_start = stint.get("lap_start") or 1
+            lap = self._laps.get(number, lap_start)
+            out[number] = [tyres.letter(stint.get("compound")),
+                           tyres.laps_on_set(stint.get("tyre_age_at_start"), lap, lap_start)]
+        return out
 
     def _is_race_start(self, payload: dict) -> bool:
         if payload.get("message") != "SESSION STARTED" or payload.get("lap_number") != 1:
@@ -77,6 +89,12 @@ class LiveFeed:
                     self._cars[number] = [x, y]
             elif topic == "v1/position" and number is not None:
                 self._order[number] = payload.get("position")
+            elif topic == "v1/stints" and number is not None:
+                current = self._stints.get(number)
+                if current is None or payload.get("stint_number", 0) >= current.get("stint_number", 0):
+                    self._stints[number] = payload
+            elif topic == "v1/laps" and number is not None:
+                self._laps[number] = max(self._laps.get(number, 0), payload.get("lap_number") or 0)
             elif topic == "v1/race_control":
                 self._message = payload.get("message") or self._message
                 self._status.apply(payload)
@@ -93,6 +111,7 @@ class LiveFeed:
                 "order": dict(self._order),
                 "message": self._message,
                 "status": self._status.snapshot(),
+                "tyres": self._tyres(),
                 "lightsOutAgo": (None if self._lights_out_at is None
                                  else round(time.monotonic() - self._lights_out_at, 1)),
             }

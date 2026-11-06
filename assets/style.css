@@ -176,7 +176,7 @@ body {
 .track-btn:hover { color: var(--ink); background: #262624; }
 .track-btn.on { color: var(--ink); border-color: var(--accent); }
 .track-note { min-height: 20px; color: var(--ink-2); font-size: 12px; margin-bottom: 4px; }
-.track-layout { display: grid; grid-template-columns: minmax(0, 1fr) 170px; gap: 12px; }
+.track-layout { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 12px; }
 .track-stage svg { display: block; width: 100%; height: auto; }
 .track-line {
   fill: none;
@@ -257,6 +257,38 @@ body {
   padding: 3px 0;
   color: var(--ink-2);
   border-bottom: 1px solid var(--hairline);
+}
+.track-order-head { margin-top: 6px; color: var(--muted); font-size: 11px; text-align: right; }
+.tyre-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-left: auto;
+}
+.tyre {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: #0b0b0b;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.tyre-S { background: #e66767; }
+.tyre-M { background: #fab219; }
+.tyre-H { background: #c3c2b7; }
+.tyre-I { background: #199e70; }
+.tyre-W { background: #3987e5; }
+.tyre-unknown { background: #55554f; color: var(--ink); }
+.tyre-laps {
+  min-width: 16px;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 .order-pos {
   flex: 0 0 24px;
