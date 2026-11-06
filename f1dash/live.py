@@ -22,8 +22,9 @@ from .status import TrackStatus
 
 TOKEN_URL = "https://api.openf1.org/token"
 BROKER, PORT = "mqtt.openf1.org", 8883
-TOPICS = ("v1/location", "v1/position", "v1/race_control", "v1/stints", "v1/laps")
+TOPICS = ("v1/location", "v1/position", "v1/race_control", "v1/stints", "v1/laps", "v1/pit")
 FRESH_SECONDS = 120  # the feed can replay an old SESSION STARTED stamped lap 1
+PIT_FLAG_SECONDS = 6  # keep a completed stop visible briefly in case it's the only message
 
 log = logging.getLogger("f1monitor.live")
 
@@ -60,6 +61,17 @@ class LiveFeed:
         self._lights_out_at: float | None = None
         self._stints: dict[int, dict] = {}  # each car's latest stint
         self._laps: dict[int, int] = {}
+        self._pit_until: dict[int, float] = {}  # inf until a message says the car left
+
+    def _handle_pit(self, number: int, payload: dict) -> None:
+        """A row with a lane time means the car has left; one without means it's in."""
+        left = payload.get("lane_duration") is not None
+        self._pit_until[number] = (time.monotonic() + PIT_FLAG_SECONDS if left
+                                   else float("inf"))
+
+    def _in_pit(self) -> list[int]:
+        now = time.monotonic()
+        return sorted(n for n, until in self._pit_until.items() if until > now)
 
     def _tyres(self) -> dict[int, list]:
         out = {}
@@ -95,6 +107,10 @@ class LiveFeed:
                     self._stints[number] = payload
             elif topic == "v1/laps" and number is not None:
                 self._laps[number] = max(self._laps.get(number, 0), payload.get("lap_number") or 0)
+                if not payload.get("is_pit_out_lap"):
+                    self._pit_until.pop(number, None)  # on a flying lap, whatever came before
+            elif topic == "v1/pit" and number is not None:
+                self._handle_pit(number, payload)
             elif topic == "v1/race_control":
                 self._message = payload.get("message") or self._message
                 self._status.apply(payload)
@@ -112,6 +128,7 @@ class LiveFeed:
                 "message": self._message,
                 "status": self._status.snapshot(),
                 "tyres": self._tyres(),
+                "pit": self._in_pit(),
                 "lightsOutAgo": (None if self._lights_out_at is None
                                  else round(time.monotonic() - self._lights_out_at, 1)),
             }

@@ -258,6 +258,19 @@ body {
   color: var(--ink-2);
   border-bottom: 1px solid var(--hairline);
 }
+.flag-pill.pit { background: #3987e5; color: #ffffff; }
+.pit-tag {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #3987e5;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+}
+.in-pit .car-dot { opacity: 0.55; }
+.no-label .car-label { display: none; }
 .track-order-head { margin-top: 6px; color: var(--muted); font-size: 11px; text-align: right; }
 .tyre-cell {
   display: inline-flex;

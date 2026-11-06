@@ -249,7 +249,7 @@ def load_session(session_key: int) -> Session:
         results=classify(fetch("session_result"), drivers, positions),
         laps=_dates(fetch("laps"), "date_start"),
         stints=fetch("stints"),
-        pits=fetch("pit") if is_race else empty,
+        pits=_dates(fetch("pit"), "date"),
         control=_dates(fetch("race_control"), "date"),
         weather=clean_weather(_dates(fetch("weather"), "date")),
         positions=positions,

@@ -7,7 +7,7 @@ from functools import lru_cache
 import httpx
 import pandas as pd
 
-from . import data, status, tyres
+from . import data, pits, status, tyres
 from .api import client
 
 CHUNK_SECONDS = 120  # about 1 MB from OpenF1, and one request per 2 minutes at 1x
@@ -148,6 +148,8 @@ def replay_meta(session_key: int) -> dict | None:
         "lightsOut": lights_out,
         "tyres": tyres.timeline(session.stints, session.laps, start, from_grid=session.is_race),
         "showTyreLaps": not session.is_race,
+        "pits": pits.timeline(session.pits, session.laps, start, end, session.is_race,
+                              session.drivers["driver_number"].tolist()),
         "drivers": _identities(session.drivers),
         "order": events,
         "messages": messages,

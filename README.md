@@ -23,7 +23,7 @@ Pick a season, Grand Prix and session at the top of the page. The header counts 
 | **Championship** | Title fight by round, driver standings with wins and podiums, constructors' table, calendar with winners |
 | **Session** (race or sprint) | Winner, fastest lap and biggest gain, lap-by-lap positions with Safety Car and red-flag markers, classification, race control, tyre strategy, race pace, places gained, pit stops, track conditions |
 | **Session** (practice or qualifying) | Classification with Q1–Q3 times, gap to fastest, lap time spread, tyre usage, track conditions, race control |
-| **Track** | Circuit map with every car's position, the running order with each car's tyre (and laps on that set in practice and qualifying), start lights, red and yellow flags with yellow sectors marked on the map, Safety Car and VSC status, and race control messages. Replay any finished session at up to 10× speed, or follow a session live |
+| **Track** | Circuit map with every car's position, the running order with each car's tyre (and laps on that set in practice and qualifying), a pit flag for cars in the pit lane or garage, start lights, red and yellow flags with yellow sectors marked on the map, Safety Car and VSC status, and race control messages. Replay any finished session at up to 10× speed, or follow a session live |
 | **Telemetry** | Two drivers' best laps compared: speed, throttle, brake, running gap, sector times and a track map of who was faster where |
 
 ## Good to know
@@ -33,6 +33,8 @@ Pick a season, Grand Prix and session at the top of the page. The header counts 
 - **Telemetry precision:** car data is sampled at about 4 Hz, so treat small gaps on the trace as approximate. The lap and sector times are exact.
 - **Start lights:** only the moment of lights-out is recorded. The lights coming on one by one in replay are reconstructed at the regulation one-second steps, with a fixed hold, and only the first start of a race or sprint is shown, not standing restarts. Live mode can only show lights-out, about 3 seconds late.
 - **Tyres:** a car's tyre and lap count update as it starts each lap, so a change appears at the start of the out-lap rather than the instant of the stop. Compounds OpenF1 doesn't know show as `?`.
+- **Pit flag:** in replay, time in the pits comes from each stop's recorded lane time and matches car speed to about a second. A car's first exit of a session or qualifying phase and its final return to the garage aren't timed by OpenF1, so those moments are estimated from its laps. A retirement into the garage during a race isn't flagged.
+- **Pit flag in live mode:** OpenF1 doesn't document whether a pit message arrives when a car enters or only when it leaves. If only on leaving, the flag appears as the car exits and stays for a few seconds.
 - **Flags in live mode:** status is built from messages received while connected, so a flag already out when you connect won't show until it changes.
 
 ## Following a session live

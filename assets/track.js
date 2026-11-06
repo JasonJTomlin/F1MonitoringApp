@@ -10,12 +10,14 @@
   // Only lights-out is recorded. The build-up uses the regulation one-second
   // steps, and the real hold before lights-out varies, so this is a fixed stand-in.
   const LIGHT_STEP = 1, LIGHT_HOLD = 1.2, GANTRY_LEAD = 2, LIGHTS_OUT_SHOWN = 4;
+  const PIT_NAMES_SHOWN = 5; // past this, the banner gives a count
+  const PIT_LABELS_ON_MAP = 3; // a full garage would bury the map in labels
 
   const state = {
     sessionKey: null, active: false, mode: "replay", meta: null,
     clock: 0, speed: 1, playing: false, buffering: false, lastTick: 0,
     chunks: new Map(), pending: new Set(), project: null, marks: new Map(),
-    sectorMarks: new Map(), statusKey: null,
+    sectorMarks: new Map(), statusKey: null, pitKey: null,
     liveTargets: new Map(), pollTimer: null, frame: null, loadId: 0,
   };
 
@@ -38,7 +40,10 @@
       </div>
       <div id="track-note" class="track-note"></div>
       <div class="track-status">
-        <div id="track-flags" class="track-flags" role="status"></div>
+        <div class="track-flags">
+          <div id="track-flags" class="track-flags" role="status"></div>
+          <div id="track-pit" class="track-flags" role="status"></div>
+        </div>
         <div id="track-gantry" class="gantry" hidden></div>
       </div>
       <div class="track-layout">
@@ -206,8 +211,9 @@
     label.textContent = who.code;
     group.append(dot, label);
     el("track-svg").append(group);
-    const entry = { group, x: null, y: null };
+    const entry = { group, label, code: who.code, x: null, y: null };
     state.marks.set(number, entry);
+    state.pitKey = null; // a car drawn after the last pit update still needs its flag
     return entry;
   }
 
@@ -302,11 +308,27 @@
     return box;
   }
 
-  function showOrder(order, tyres) {
+  function showPits(inPit) {
+    const key = [...inPit].join();
+    if (key === state.pitKey) return;
+    state.pitKey = key;
+    const codes = [...inPit].map((n) => (state.meta.drivers[n] || { code: n }).code);
+    const text = codes.length > PIT_NAMES_SHOWN ? `${codes.length} cars` : codes.join(", ");
+    el("track-pit").replaceChildren(...(codes.length ? [pill("pit", `P · In pits: ${text}`)] : []));
+    const crowded = inPit.size > PIT_LABELS_ON_MAP;
+    for (const [number, entry] of state.marks) {
+      const here = inPit.has(number);
+      entry.group.classList.toggle("in-pit", here);
+      entry.group.classList.toggle("no-label", here && crowded);
+      entry.label.textContent = here ? `${entry.code} PIT` : entry.code;
+    }
+  }
+
+  function showOrder(order, tyres, inPit) {
     const list = el("track-order");
     if (!list) return;
     const rows = Object.entries(order).sort((a, b) => a[1] - b[1]);
-    const key = JSON.stringify(rows.map((r) => [r[0], tyres[r[0]]]));
+    const key = JSON.stringify(rows.map((r) => [r[0], tyres[r[0]], inPit.has(r[0])]));
     if (list.dataset.key === key) return;
     list.dataset.key = key;
     list.replaceChildren(...rows.map(([number, position]) => {
@@ -318,7 +340,14 @@
       const swatch = document.createElement("span");
       swatch.className = "swatch";
       swatch.style.background = who.colour;
-      item.append(place, swatch, who.code, tyreChip(tyres[number]));
+      item.append(place, swatch, who.code);
+      if (inPit.has(number)) {
+        const flag = document.createElement("span");
+        flag.className = "pit-tag";
+        flag.textContent = "PIT";
+        item.append(flag);
+      }
+      item.append(tyreChip(tyres[number]));
       return item;
     }));
   }
@@ -335,7 +364,13 @@
       const i = lastBefore(events, t, (event) => event[0]);
       if (i >= 0) tyres[number] = events[i].slice(1);
     }
-    showOrder(order, tyres);
+    const inPit = new Set();
+    for (const [number, visits] of Object.entries(meta.pits)) {
+      const i = lastBefore(visits, t, (visit) => visit[0]);
+      if (i >= 0 && t < visits[i][1]) inPit.add(number);
+    }
+    showOrder(order, tyres, inPit);
+    showPits(inPit);
     let lap = 0;
     for (const [time, number] of meta.laps) {
       if (time > t) break;
@@ -411,6 +446,8 @@
     el("track-live").textContent = "Watch live";
     el("track-message").textContent = "";
     el("track-flags").replaceChildren();
+    el("track-pit").replaceChildren();
+    state.pitKey = null;
     showGantry(null, false);
     if (!state.sessionKey) return;
     note("Loading circuit…");
@@ -448,7 +485,9 @@
       const body = await (await fetch("/api/track/live")).json();
       if (id !== state.loadId) return;
       state.liveTargets = new Map(Object.entries(body.cars));
-      showOrder(body.order, body.tyres);
+      const inPit = new Set(body.pit.map(String));
+      showOrder(body.order, body.tyres, inPit);
+      showPits(inPit);
       el("track-message").textContent = body.message;
       showStatus(body.status);
       // The feed only reports lights-out, about 3 s late, so there's no build-up to show.
