@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+import httpx
 import pandas as pd
 
-from . import data
+from . import data, status
 from .api import client
 
 CHUNK_SECONDS = 120  # about 1 MB from OpenF1, and one request per 2 minutes at 1x
@@ -50,6 +51,38 @@ def frames_from_rows(rows: list[dict], start: pd.Timestamp) -> dict:
     }
 
 
+def sector_paths(path: list[list[int]], starts: dict[int, list[float]]) -> dict[int, list]:
+    """Split a closed circuit path into marshal sectors, given each one's start point."""
+    def nearest(point: list[float]) -> int:
+        return min(range(len(path)),
+                   key=lambda i: (path[i][0] - point[0]) ** 2 + (path[i][1] - point[1]) ** 2)
+
+    numbers = sorted(starts)
+    edges = [nearest(starts[n]) for n in numbers]
+    sectors = {}
+    for i, number in enumerate(numbers):
+        begin, end = edges[i], edges[(i + 1) % len(edges)]
+        sectors[number] = (path[begin:end + 1] if end > begin
+                           else path[begin:] + path[:end + 1])  # crosses the path's seam
+    return sectors
+
+
+def circuit(year: int, meeting_key: int) -> dict | None:
+    """Official outline and marshal sectors, in the same coordinates as the cars."""
+    meets = data.meetings(year)
+    row = meets[meets["meeting_key"] == meeting_key]
+    if row.empty or not row.iloc[0].get("circuit_info_url"):
+        return None
+    try:
+        info = client.get_url(row.iloc[0]["circuit_info_url"])
+        path = [[int(x), int(y)] for x, y in zip(info["x"], info["y"])]
+        starts = {s["number"]: [s["trackPosition"]["x"], s["trackPosition"]["y"]]
+                  for s in info["marshalSectors"]}
+    except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError):
+        return None  # the lap-based outline still works, just without sectors
+    return {"outline": path, "sectors": sector_paths(path, starts)} if path else None
+
+
 def outline(session: data.Session) -> list[list[int]]:
     """Trace of the fastest usable lap, tried in order in case one lacks location data."""
     laps = data.clean_laps(session.laps)
@@ -78,7 +111,8 @@ def replay_meta(session_key: int) -> dict | None:
     if session.laps.empty or session.laps["date_start"].isna().all():
         return None
     start, end = _bounds(session_key)
-    shape = outline(session)
+    layout = circuit(session.info["year"], session.info["meeting_key"])
+    shape = layout["outline"] if layout else outline(session)
     if not shape:
         return None
 
@@ -97,15 +131,21 @@ def replay_meta(session_key: int) -> dict | None:
         messages = [[t, m] for t, m in zip(_seconds(notes["date"], start), notes["message"])]
 
     laps = []
+    lights_out = None
     if session.is_race:
         firsts = session.laps.dropna(subset=["date_start"]).groupby("lap_number")["date_start"].min()
         laps = [[t, int(n)] for t, n in zip(_seconds(firsts, start), firsts.index)]
+        # Lap 1's start is the timing system's lights-out; cars move about 0.8 s later.
+        lights_out = laps[0][0] if laps and firsts.index[0] == 1 else None
 
     return {
         "title": session.info["session_name"],
         "duration": round((end - start).total_seconds()),
         "chunkSeconds": CHUNK_SECONDS,
         "outline": shape,
+        "sectors": layout["sectors"] if layout else {},
+        "status": status.timeline(session.control, start),
+        "lightsOut": lights_out,
         "drivers": _identities(session.drivers),
         "order": events,
         "messages": messages,
@@ -137,15 +177,18 @@ def live_session(sessions: pd.DataFrame, moment: pd.Timestamp) -> dict | None:
 
 
 def live_meta() -> dict | None:
-    """Outline and names for the live session, borrowed from a free finished session.
+    """Circuit and names for the live session.
 
-    Live-window REST data isn't free, so this uses the circuit's most recent
-    session that is already historical, this year or last.
+    Live-window REST data isn't free, so driver names (and the outline, if the
+    circuit data is missing) come from the circuit's most recent session that is
+    already historical, this year or last.
     """
     year = data.now().year
     current = live_session(data.sessions(year), data.now())
     if current is None:
         return None
+    layout = circuit(year, int(current["meeting_key"]))
+    title = f"{current['session_name']} · {current['location']}"
     for season in (year, year - 1):
         past = data.sessions(season)
         if past.empty:
@@ -154,11 +197,14 @@ def live_meta() -> dict | None:
                     & (past["date_end"] + LIVE_MARGIN < data.now())]
         for key in reversed(past["session_key"].tolist()):
             source = data.load_session(int(key))
-            shape = outline(source)
+            shape = layout["outline"] if layout else outline(source)
             if shape:
                 return {
-                    "title": f"{current['session_name']} · {current['location']}",
+                    "title": title,
                     "outline": shape,
+                    "sectors": layout["sectors"] if layout else {},
                     "drivers": _identities(source.drivers),
                 }
+    if layout:
+        return {"title": title, "drivers": {}, **layout}
     return None

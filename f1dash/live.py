@@ -11,13 +11,18 @@ import logging
 import os
 import ssl
 import threading
+import time
 
 import httpx
 import paho.mqtt.client as mqtt
+import pandas as pd
+
+from .status import TrackStatus
 
 TOKEN_URL = "https://api.openf1.org/token"
 BROKER, PORT = "mqtt.openf1.org", 8883
 TOPICS = ("v1/location", "v1/position", "v1/race_control")
+FRESH_SECONDS = 120  # the feed can replay an old SESSION STARTED stamped lap 1
 
 log = logging.getLogger("f1monitor.live")
 
@@ -50,6 +55,14 @@ class LiveFeed:
         self._cars: dict[int, list[int]] = {}
         self._order: dict[int, int] = {}
         self._message = ""
+        self._status = TrackStatus()
+        self._lights_out_at: float | None = None
+
+    def _is_race_start(self, payload: dict) -> bool:
+        if payload.get("message") != "SESSION STARTED" or payload.get("lap_number") != 1:
+            return False
+        age = pd.Timestamp.now(tz="UTC") - pd.Timestamp(payload["date"])
+        return age.total_seconds() < FRESH_SECONDS
 
     def handle(self, topic: str, payload: dict) -> None:
         """Apply one feed message. Messages from a new session clear the old state."""
@@ -66,6 +79,9 @@ class LiveFeed:
                 self._order[number] = payload.get("position")
             elif topic == "v1/race_control":
                 self._message = payload.get("message") or self._message
+                self._status.apply(payload)
+                if self._is_race_start(payload):
+                    self._lights_out_at = time.monotonic()
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -76,6 +92,9 @@ class LiveFeed:
                 "cars": dict(self._cars),
                 "order": dict(self._order),
                 "message": self._message,
+                "status": self._status.snapshot(),
+                "lightsOutAgo": (None if self._lights_out_at is None
+                                 else round(time.monotonic() - self._lights_out_at, 1)),
             }
 
     def start(self) -> None:

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+import httpx
 from pyopenf1.core.http_client import BaseHTTPClient
 from pyopenf1.core.rate_limiter import RateLimiter
 from pyopenf1.exceptions import AuthenticationError, NotFoundError
@@ -78,8 +79,21 @@ class OpenF1:
             path.write_text(json.dumps(rows), encoding="utf-8")
             return rows
 
+    def get_url(self, url: str, ttl: float | None = None) -> Any:
+        """Fetch a JSON document OpenF1 links to, through the same disk cache."""
+        path = self._cache_dir / f"{hashlib.sha1(url.encode()).hexdigest()}.json"
+        with self._locks[url]:
+            cached = self._read(path, ttl)
+            if cached is not None:
+                return cached
+            response = httpx.get(url, timeout=20, follow_redirects=True,
+                                 headers={"User-Agent": "f1-monitor"})
+            response.raise_for_status()
+            path.write_text(response.text, encoding="utf-8")
+            return response.json()
+
     @staticmethod
-    def _read(path: Path, ttl: float | None) -> list[dict] | None:
+    def _read(path: Path, ttl: float | None) -> Any:
         if not path.exists():
             return None
         rows = json.loads(path.read_text(encoding="utf-8"))

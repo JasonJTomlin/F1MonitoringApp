@@ -7,11 +7,15 @@
   const PREFETCH_SECONDS = 40;
   const LIVE_POLL_MS = 400;
   const LIVE_EASING = 0.18; // fraction of the way to the newest fix, per frame
+  // Only lights-out is recorded. The build-up uses the regulation one-second
+  // steps, and the real hold before lights-out varies, so this is a fixed stand-in.
+  const LIGHT_STEP = 1, LIGHT_HOLD = 1.2, GANTRY_LEAD = 2, LIGHTS_OUT_SHOWN = 4;
 
   const state = {
     sessionKey: null, active: false, mode: "replay", meta: null,
     clock: 0, speed: 1, playing: false, buffering: false, lastTick: 0,
     chunks: new Map(), pending: new Set(), project: null, marks: new Map(),
+    sectorMarks: new Map(), statusKey: null,
     liveTargets: new Map(), pollTimer: null, frame: null, loadId: 0,
   };
 
@@ -33,6 +37,10 @@
         <button id="track-live" class="track-btn" hidden>Watch live</button>
       </div>
       <div id="track-note" class="track-note"></div>
+      <div class="track-status">
+        <div id="track-flags" class="track-flags" role="status"></div>
+        <div id="track-gantry" class="gantry" hidden></div>
+      </div>
       <div class="track-layout">
         <div class="card track-stage"><svg id="track-svg" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-label="Circuit map with car positions"></svg></div>
         <div class="card track-side">
@@ -90,7 +98,95 @@
     const line = document.createElementNS(SVG, "polygon");
     line.setAttribute("points", meta.outline.map((p) => state.project(p[0], p[1]).join(",")).join(" "));
     line.setAttribute("class", "track-line");
+    line.id = "track-line";
     svg.append(line);
+
+    state.sectorMarks = new Map();
+    for (const [number, points] of Object.entries(meta.sectors || {})) {
+      const projected = points.map((p) => state.project(p[0], p[1]));
+      const path = document.createElementNS(SVG, "polyline");
+      path.setAttribute("points", projected.map((p) => p.join(",")).join(" "));
+      path.setAttribute("class", "sector-line");
+      const middle = projected[Math.floor(projected.length / 2)];
+      const label = document.createElementNS(SVG, "text");
+      label.setAttribute("x", middle[0]);
+      label.setAttribute("y", middle[1] - 12);
+      label.setAttribute("class", "sector-label");
+      label.textContent = `S${number}`;
+      path.style.display = label.style.display = "none";
+      svg.append(path, label);
+      state.sectorMarks.set(number, { path, label });
+    }
+    state.statusKey = null;
+  }
+
+  function pill(kind, text) {
+    const item = document.createElement("span");
+    item.className = `flag-pill ${kind}`;
+    item.textContent = text;
+    return item;
+  }
+
+  function sectorList(sectors, flag) {
+    const numbers = Object.keys(sectors).filter((n) => sectors[n] === flag);
+    if (!numbers.length) return "";
+    return `${numbers.length > 1 ? "Sectors" : "Sector"} ${numbers.join(", ")}`;
+  }
+
+  function showStatus(status) {
+    const current = status || { sectors: {} };
+    const key = JSON.stringify(current);
+    if (key === state.statusKey) return;
+    state.statusKey = key;
+
+    const pills = [];
+    if (current.red) pills.push(pill("red", "■ Red flag"));
+    if (current.safetyCar) {
+      const name = current.safetyCar === "VSC" ? "Virtual Safety Car" : "Safety Car";
+      pills.push(pill("yellow", `▲ ${name}${current.ending ? " ending" : ""}`));
+    }
+    if (current.trackYellow) pills.push(pill("yellow", "⚑ Yellow · Whole track"));
+    const single = sectorList(current.sectors, "YELLOW");
+    const double = sectorList(current.sectors, "DOUBLE YELLOW");
+    if (double) pills.push(pill("yellow", `⚑⚑ Double yellow · ${double}`));
+    if (single) pills.push(pill("yellow", `⚑ Yellow · ${single}`));
+    if (!pills.length) pills.push(pill("clear", "✓ Track clear"));
+    el("track-flags").replaceChildren(...pills);
+
+    el("track-line").classList.toggle("red", Boolean(current.red));
+    for (const [number, { path, label }] of state.sectorMarks) {
+      const flag = current.sectors[number];
+      path.style.display = label.style.display = flag ? "" : "none";
+      path.classList.toggle("double", flag === "DOUBLE YELLOW");
+    }
+  }
+
+  function showGantry(lit, out) {
+    const gantry = el("track-gantry");
+    const visible = lit !== null;
+    gantry.hidden = !visible;
+    if (!visible) return;
+    if (gantry.childElementCount !== 6) {
+      gantry.replaceChildren(
+        ...Array.from({ length: 5 }, () => document.createElement("span")),
+        Object.assign(document.createElement("strong"), { textContent: "Lights out" }));
+    }
+    [...gantry.children].forEach((node, i) => {
+      if (i < 5) node.classList.toggle("lit", i < lit);
+    });
+    gantry.classList.toggle("out", out);
+    gantry.setAttribute("aria-label", out ? "Lights out" : `${lit} of 5 start lights on`);
+  }
+
+  function replayGantry() {
+    const out = state.meta.lightsOut;
+    if (out === null || out === undefined) return showGantry(null, false);
+    const firstLight = out - LIGHT_HOLD - 4 * LIGHT_STEP;
+    const t = state.clock;
+    if (t < firstLight - GANTRY_LEAD || t >= out + LIGHTS_OUT_SHOWN) return showGantry(null, false);
+    if (t >= out) return showGantry(0, true);
+    const lit = t < firstLight ? 0 : Math.min(5, Math.floor((t - firstLight) / LIGHT_STEP) + 1);
+    showGantry(lit, false);
   }
 
   function mark(number) {
@@ -224,6 +320,13 @@
       text = message;
     }
     el("track-message").textContent = text;
+    let status = null;
+    for (const [time, snapshot] of meta.status) {
+      if (time > t) break;
+      status = snapshot;
+    }
+    showStatus(status);
+    replayGantry();
   }
 
   function render() {
@@ -278,6 +381,8 @@
     replayControls(true);
     el("track-live").textContent = "Watch live";
     el("track-message").textContent = "";
+    el("track-flags").replaceChildren();
+    showGantry(null, false);
     if (!state.sessionKey) return;
     note("Loading circuit…");
     try {
@@ -316,6 +421,10 @@
       state.liveTargets = new Map(Object.entries(body.cars));
       showOrder(body.order);
       el("track-message").textContent = body.message;
+      showStatus(body.status);
+      // The feed only reports lights-out, about 3 s late, so there's no build-up to show.
+      const justStarted = body.lightsOutAgo !== null && body.lightsOutAgo < LIGHTS_OUT_SHOWN;
+      showGantry(justStarted ? 0 : null, justStarted);
       const waiting = Object.keys(body.cars).length ? "" : "Connected. Waiting for car data…";
       note(body.error || (body.connected ? waiting : "Connecting to OpenF1…"));
     } catch (error) {
