@@ -16,11 +16,18 @@ MAX_GAP_FRAMES = 2  # bridge brief dropouts, but let a stopped feed show as miss
 FINAL_LAP_WINDOW = pd.Timedelta(minutes=10)  # long enough for a slow crawl back to the pits
 
 
+# The location feed also tracks the Safety Car as car 241. It appears in exactly
+# the Safety Car periods, to the second, and when it leads a restart.
+SAFETY_CAR = 241
+
+
 def _identities(drivers: pd.DataFrame) -> dict:
+    cars = {SAFETY_CAR: {"code": "SC", "colour": "#fab219", "vehicle": True}}
     if drivers.empty:
-        return {}
-    return {int(r.driver_number): {"code": r.name_acronym, "colour": r.team_colour}
-            for r in drivers.itertuples()}
+        return cars
+    cars.update({int(r.driver_number): {"code": r.name_acronym, "colour": r.team_colour}
+                 for r in drivers.itertuples()})
+    return cars
 
 
 def _seconds(moments: pd.Series, start: pd.Timestamp) -> pd.Series:

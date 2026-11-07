@@ -31,12 +31,12 @@
 
   function buildShell(root) {
     root.innerHTML = `
-      <div class="track-bar">
-        <button id="track-play" class="track-btn" aria-label="Play">Play</button>
-        <input id="track-seek" type="range" min="0" max="100" value="0" step="1" aria-label="Session time">
+      <div class="track-bar card">
+        <button id="track-play" class="play-btn" aria-label="Play"><span class="play-icon" aria-hidden="true"></span></button>
         <span id="track-time" class="track-time">00:00:00</span>
-        <span id="track-speeds" class="track-speeds" role="group" aria-label="Playback speed"></span>
-        <button id="track-live" class="track-btn" hidden>Watch live</button>
+        <input id="track-seek" type="range" min="0" max="100" value="0" step="1" aria-label="Session time">
+        <span id="track-speeds" class="segmented" role="group" aria-label="Playback speed"></span>
+        <button id="track-live" class="track-btn live-btn" hidden>Watch live</button>
       </div>
       <div id="track-note" class="track-note"></div>
       <div class="track-status">
@@ -61,11 +61,15 @@
       <p id="track-message" class="track-message"></p>`;
     SPEEDS.forEach((speed) => {
       const button = document.createElement("button");
-      button.className = "track-btn" + (speed === state.speed ? " on" : "");
+      button.className = speed === state.speed ? "on" : "";
+      button.setAttribute("aria-pressed", String(speed === state.speed));
       button.textContent = `${speed}×`;
       button.onclick = () => {
         state.speed = speed;
-        [...el("track-speeds").children].forEach((b) => b.classList.toggle("on", b === button));
+        [...el("track-speeds").children].forEach((b) => {
+          b.classList.toggle("on", b === button);
+          b.setAttribute("aria-pressed", String(b === button));
+        });
       };
       el("track-speeds").append(button);
     });
@@ -80,7 +84,7 @@
     state.lastTick = performance.now();
     const button = el("track-play");
     if (button) {
-      button.textContent = on ? "Pause" : "Play";
+      button.classList.toggle("playing", on);
       button.setAttribute("aria-label", on ? "Pause" : "Play");
     }
   }
@@ -206,7 +210,8 @@
     const dot = document.createElementNS(SVG, "circle");
     dot.setAttribute("r", 7);
     dot.setAttribute("fill", who.colour);
-    dot.setAttribute("class", "car-dot");
+    dot.setAttribute("class", who.vehicle ? "car-dot safety-car" : "car-dot");
+    if (who.vehicle) dot.setAttribute("r", 8);
     const label = document.createElementNS(SVG, "text");
     label.setAttribute("x", 11);
     label.setAttribute("y", 4);

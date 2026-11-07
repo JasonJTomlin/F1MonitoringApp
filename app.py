@@ -56,26 +56,39 @@ def _loading(child) -> dcc.Loading:
 
 this_year = data.now().year
 app.layout = html.Div(className="page", children=[
-    html.Header(className="top", children=[
-        html.H1("F1 Monitor"),
+    html.Header(className="topbar", children=[
+        html.Div(className="brand", children=[
+            html.Span(className="brand-mark", **{"aria-hidden": "true"}),
+            html.Div([html.H1("F1 Monitor"), html.Div(id="context", className="brand-sub")]),
+        ]),
+        html.Div(className="filters", children=[
+            html.Label(["Season", dcc.Dropdown(
+                id="season", clearable=False, value=this_year, searchable=False,
+                options=[{"label": str(y), "value": y}
+                         for y in range(this_year, data.FIRST_SEASON - 1, -1)])],
+                className="season"),
+            html.Label(["Grand Prix", dcc.Dropdown(id="meeting", clearable=False)],
+                       className="grow"),
+            html.Label(["Session", dcc.Dropdown(id="session", clearable=False, searchable=False)],
+                       className="session"),
+        ]),
         html.Div(id="next-up", className="next-up"),
     ]),
-    html.Div(className="filters", children=[
-        html.Label(["Season", dcc.Dropdown(
-            id="season", clearable=False, value=this_year,
-            options=[{"label": str(y), "value": y}
-                     for y in range(this_year, data.FIRST_SEASON - 1, -1)])]),
-        html.Label(["Grand Prix", dcc.Dropdown(id="meeting", clearable=False)], className="grow"),
-        html.Label(["Session", dcc.Dropdown(id="session", clearable=False)]),
-    ]),
-    dcc.Tabs(id="tab", value="season", className="tabs", children=[
-        dcc.Tab(label="Championship", value="season", children=_loading(html.Div(id="season-view"))),
-        dcc.Tab(label="Session", value="session", children=_loading(html.Div(id="session-view"))),
-        dcc.Tab(label="Track", value="track", children=[
+    dcc.Tabs(id="tab", value="season", className="tabs", parent_className="tabs-parent",
+             content_className="tab-body", mobile_breakpoint=0, children=[
+        dcc.Tab(label="Championship", value="season", className="tab",
+                selected_className="tab--active",
+                children=_loading(html.Div(id="season-view"))),
+        dcc.Tab(label="Session", value="session", className="tab",
+                selected_className="tab--active",
+                children=_loading(html.Div(id="session-view"))),
+        dcc.Tab(label="Track", value="track", className="tab", selected_className="tab--active",
+                children=[
             html.Div(id="track-root"),
             html.P(id="track-hint", className="card-note"),
         ]),
-        dcc.Tab(label="Telemetry", value="telemetry", children=[
+        dcc.Tab(label="Telemetry", value="telemetry", className="tab",
+                selected_className="tab--active", children=[
             html.Div(className="filters inner", children=[
                 html.Label(["Driver A", dcc.Dropdown(id="driver-a", clearable=False)],
                            className="grow"),
@@ -86,8 +99,9 @@ app.layout = html.Div(className="page", children=[
         ]),
     ]),
     html.Footer([
-        "Data from ", html.A("OpenF1", href="https://openf1.org", target="_blank"),
-        ". Unofficial; not associated with Formula 1.",
+        html.Span(["Data from ", html.A("OpenF1", href="https://openf1.org", target="_blank"),
+                   " and MultiViewer circuit maps."]),
+        html.Span("Unofficial. Not associated with Formula 1."),
     ]),
     dcc.Interval(id="tick", interval=30_000),
     dcc.Store(id="track-sink"),
@@ -253,18 +267,36 @@ def show_next_up(_):
     except Exception as exc:
         log.warning("Schedule unavailable: %s", exc)
         return ""
-    parts = []
     if status.live:
-        parts.append(html.Span(f"● Live now: {status.live['meeting_name']} · "
-                               f"{status.live['session_name']}", className="live"))
+        now = status.live
+        return [
+            html.Div([html.Span(className="live-dot"), "Live now"], className="eyebrow live"),
+            html.Div(now["session_name"], className="next-title"),
+            html.Div(now["meeting_name"], className="next-meta"),
+        ]
     if status.upcoming:
         nxt = status.upcoming
         local = nxt["date_start"].to_pydatetime().astimezone()
-        parts.append(html.Span([
-            "Next: ", html.Strong(f"{nxt['meeting_name']} · {nxt['session_name']}"),
-            f" in {_countdown(nxt['date_start'])} ({local:%a %H:%M} your time)",
-        ]))
-    return parts
+        return [
+            html.Div(["Next session · ", html.Span(f"{local:%a %H:%M}", className="next-when")],
+                     className="eyebrow"),
+            html.Div([nxt["session_name"], html.Span(f"in {_countdown(nxt['date_start'])}",
+                                                     className="next-in")],
+                     className="next-title"),
+            html.Div(nxt["meeting_name"], className="next-meta"),
+        ]
+    return []
+
+
+@app.callback(Output("context", "children"),
+              Input("meeting", "value"), Input("session", "value"),
+              State("meeting", "options"), State("session", "options"))
+def show_context(meeting, session, meetings, sessions):
+    """Names the selection under the title, so it stays in view while scrolling."""
+    def label(options, value):
+        return next((o["label"] for o in options or [] if o["value"] == value), "")
+    grand_prix = label(meetings, meeting).split(" · ", 1)[-1]
+    return " · ".join(part for part in (grand_prix, label(sessions, session)) if part)
 
 
 if __name__ == "__main__":
